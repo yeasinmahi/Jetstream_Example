@@ -1,11 +1,11 @@
-# NATS JetStream Tutorial: Publisher and Dynamic Consumer in C#
+# NATS Tutorial: Publisher and Dynamic Consumer in C#
 
-This tutorial guides you through setting up a basic NATS JetStream publisher and a dynamic consumer in C#.
+This tutorial guides you through setting up a basic NATS publisher and a dynamic consumer in C#.
 
 ## Prerequisites
 
 - .NET Core SDK (version 3.1 or later)
-- NATS Server with JetStream enabled
+- NATS Server
 - NATS.Client NuGet package
 
 ## Installation
@@ -17,15 +17,15 @@ This tutorial guides you through setting up a basic NATS JetStream publisher and
     dotnet add package NATS.Client
     ```
 
-3. Ensure you have a running NATS server with JetStream enabled. You can download and run the NATS server from [nats.io](https://nats.io/download/).
+3. Ensure you have a running NATS server. You can download and run the NATS server from [nats.io](https://nats.io/download/).
 
-## Setting Up the JetStream Launcher application
+## Setting Up the NATS Launcher application
 
 Create a new .NET console application for the application lancher:
 
 ```bash
-dotnet new console -n JetstreamExample
-cd JetstreamExample
+dotnet new console -n NATS_Example
+cd NATS_Example
 dotnet add package NATS.Client
 ```
 
@@ -33,38 +33,35 @@ Create a Program.cs file with the following code:
 ```bash
 using System.Diagnostics;
 
-public class Program
+class Program
 {
-
-    public static void Main(string[] args)
+    static void Main(string[] args)
     {
-        Console.Write("Enter the number of consumers: ");
-        if (int.TryParse(Console.ReadLine(), out int numberOfConsumers))
+        while (true)
         {
-            
-            for (int i = 0; i < numberOfConsumers; i++)
+            Console.Write("Enter the number of consumers: ");
+            if (int.TryParse(Console.ReadLine(), out int numberOfConsumers))
             {
-                string consumerName = $"Consumer_{i + 1}";
-                StartConsumer(consumerName);
+                for (int i = 0; i < numberOfConsumers; i++)
+                {
+                    string consumerName = $"Consumer_{i + 1}";
+                    StartConsumer(consumerName);
+                }
+            }
+            else
+            {
+                Console.WriteLine("Invalid number.");
             }
         }
-        else
-        {
-            Console.WriteLine("Invalid number.");
-        }
-
-        Console.WriteLine("Press any key to exit...");
-        Console.ReadKey();
     }
-
-    
 
     static void StartConsumer(string consumerName)
     {
+        Console.WriteLine(AppDomain.CurrentDomain.BaseDirectory);
         ProcessStartInfo startInfo = new ProcessStartInfo
         {
             FileName = "dotnet",
-            Arguments = $"run --project ../../../../Consumer/Consumer.csproj {consumerName}",
+            Arguments = $"run --project ../../../../Consumer/Consumer.csproj {consumerName}", // Adjust the path as needed
             CreateNoWindow = false,
             UseShellExecute = true
         };
@@ -78,7 +75,6 @@ public class Program
     }
 }
 
-
 ```
 
 ## Setting Up the Dynamic Consumer
@@ -90,53 +86,41 @@ dotnet add package NATS.Client
 ```
 Create a Consumer.cs file with the following code:
 ```bash
-using NATS.Client.JetStream;
 using NATS.Client;
+using System.Text;
 
 namespace Consumer
 {
     public class Consumer
     {
-        public static void consumer(string[] args)
+        public static void Consume(string[] args)
         {
-            string natsUrl = "nats://localhost:4222"; // Replace with your NATS server URL
-            string stream = "example_stream"; // Replace with your stream name
-            string subject = "example.subject"; // Replace with your subject
-            string consumerName = args.Length > 0 ? args[0] : "Consumer";
-
-            Console.WriteLine($"{consumerName} is starting...");
-
+            Console.WriteLine($"Hello, I am Consumer");
             Options opts = ConnectionFactory.GetDefaultOptions();
-            opts.Url = natsUrl;
+            opts.Url = "nats://localhost:4222";
 
-            using (IConnection connection = new ConnectionFactory().CreateConnection(opts))
+            using (IConnection c = new ConnectionFactory().CreateConnection(opts))
             {
-                IJetStream js = connection.CreateJetStreamContext();
-
-                PushSubscribeOptions pso = PushSubscribeOptions.Builder()
-                    .WithStream(stream)
-                    .Build();
-
+                string subject = "example";
                 EventHandler<MsgHandlerEventArgs> msgHandler = (sender, args) =>
                 {
-                    Console.WriteLine($"{consumerName} received: {args.Message}");
-                    args.Message.Ack();
+                    string receivedMessage = Encoding.UTF8.GetString(args.Message.Data);
+                    Console.WriteLine($"{subject}: {receivedMessage}");
                 };
 
-                IJetStreamPushAsyncSubscription subscription = js.PushSubscribeAsync(subject, msgHandler, false, pso);
+                c.SubscribeAsync(subject, msgHandler);
+                Console.WriteLine($"Subscribed to subject: {subject}");
 
-                Console.WriteLine($"{consumerName} is listening on {subject}");
-                Console.WriteLine("Press any key to exit...");
-                Console.ReadKey();
+                // Keep the application running to listen for messages
+                Console.ReadLine();
             }
         }
     }
 }
-
 ```
 Also create a Program.cs file with the following code:
 ```bash
-Consumer.Consumer.consumer(args);
+Consumer.Consumer.Consume(args);
 ```
 
 ## Setting Up the Publisher
@@ -149,87 +133,51 @@ dotnet add package NATS.Client
 Create a Publisher.cs file with the following code:
 ```bash
 using NATS.Client;
-using NATS.Client.JetStream;
+using System.Text;
 
 namespace Publisher
 {
     public class Publisher
     {
-        public static void publisher()
+        public static void Publish(string[] args)
         {
-            string natsUrl = "nats://localhost:4222"; // Replace with your NATS server URL
-            string stream = "example_stream"; // Replace with your stream name
-            string subject = "example.subject"; // Replace with your subject
-
             Options opts = ConnectionFactory.GetDefaultOptions();
-            opts.Url = natsUrl;
-            opts.Timeout = 5000; // Set a timeout of 5 seconds
-
-            using (IConnection connection = new ConnectionFactory().CreateConnection(opts))
+            opts.Url = "nats://localhost:4222";
+            string subject = "example";
+            while (true)
             {
-                IJetStreamManagement jsm = connection.CreateJetStreamManagementContext();
-                IJetStream js = connection.CreateJetStreamContext();
-
-                // Create a stream if it doesn't exist
-                StreamConfiguration streamConfig = StreamConfiguration.Builder()
-                    .WithName(stream)
-                    .WithSubjects(subject)
-                    .Build();
-
-                try
+                string msg = Console.ReadLine();
+                if (msg == null)
                 {
-                    jsm.AddStream(streamConfig);
+                    Console.WriteLine($"{subject}: No message received");
+                    Thread.Sleep(1000);
                 }
-                catch (NATSJetStreamException e)
+                else
                 {
-                    // If the stream already exists, ignore the error
-                    if (e.ApiErrorCode != 10058)
+                    using (IConnection c = new ConnectionFactory().CreateConnection(opts))
                     {
-                        throw;
-                    }
-                }
+                        c.Publish(subject, Encoding.UTF8.GetBytes(msg));
 
-                Console.WriteLine("Enter messages to publish. Type 'exit' to quit.");
-                while (true)
-                {
-                    string message = Console.ReadLine();
-                    if (message.ToLower() == "exit")
-                    {
-                        break;
-                    }
-
-                    Msg msg = new Msg(subject, System.Text.Encoding.UTF8.GetBytes(message));
-                    try
-                    {
-                        js.Publish(msg);
-                        Console.WriteLine($"Published message: {message}");
-                    }
-                    catch (NATSTimeoutException ex)
-                    {
-                        Console.WriteLine($"Timeout occurred while publishing message: {message}. Error: {ex.Message}");
-                        // Implement retry logic if needed
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"Error occurred while publishing message: {message}. Error: {ex.Message}");
                     }
                 }
             }
+
         }
     }
 }
 
+
 ```
 Also create a Program.cs file with the following code:
 ```bash
-Publisher.Publisher.publisher();
+Publisher.Publisher.Publish(args);
 ```
 Run the publisher:
 ```bash
 dotnet run
 ```
->**Please configure the solution startup as multiple startup project and change none to start for the project JetStramexample and Publisher application**
+>**Please configure the solution startup as multiple startup project and change none to start for the project NATS_Example and Publisher application**
 # Conclusion
-In this tutorial, you have set up a basic NATS JetStream publisher and a dynamic consumer in C#. The publisher sends a message to a subject, and the dynamic consumer receives and acknowledges the message. You can expand this basic setup to fit more complex scenarios and business requirements.
+In this tutorial, you have set up a basic NATS publisher and a dynamic consumer in C#. The publisher sends a message to a subject, and the dynamic consumer receives and acknowledges the message. You can expand this basic setup to fit more complex scenarios and business requirements.
 
-For more information on NATS JetStream, refer to the [official documentation](https://docs.nats.io/).
+For more information on NATS , refer to the [official documentation](https://docs.nats.io/).
